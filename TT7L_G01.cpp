@@ -43,6 +43,7 @@ public:
     bool isEmpty() const { return size == 0; }
 };
 
+// section 2 
 class Register {
 protected:
     int8_t value; 
@@ -94,5 +95,55 @@ public:
         if (arithmeticOp) {
             CF = (fullResult > 255 || fullResult < 0) ? 1 : 0;
         }
+    }
+};
+
+// SECTION 5 - CPU CLASS
+class CPU {
+private:
+    GeneralRegister registers[8]; 
+    Memory memory;                
+    FlagRegister flags;           
+    MyStack stack;                
+    uint8_t PC;                    
+    uint8_t SI;                    
+
+public:
+    CPU() : PC(0), SI(0) {
+        for (int i = 0; i < 8; i++) {
+            registers[i] = GeneralRegister(i);
+        }
+    }
+
+    int8_t getRegister(int index) const { return registers[index].getValue(); }
+    void setRegister(int index, int8_t val) { registers[index].setValue(val); }
+
+    int8_t readMemory(int addr) const { return memory.read(addr); }
+    void writeMemory(int addr, int8_t val) { memory.write(addr, val); }
+
+    FlagRegister& getFlags() { return flags; }
+    const FlagRegister& getFlags() const { return flags; }
+
+    uint8_t getPC() const { return PC; }
+    void incrementPC()   { PC++;      }
+    void resetPC()       { PC = 0;    }
+
+    uint8_t getSI() const { return SI; }
+
+    bool stackPush(int8_t val) {
+        bool ok = stack.push(val);
+        if (ok) SI++;
+        return ok;
+    }
+
+    bool stackPop(int8_t& out) {
+        bool ok = stack.pop(out);
+        if (ok) SI--;
+        return ok;
+    }
+
+    int8_t getMemoryCell(int i) const { return memory.getCell(i); }
+    void updateFlags(int fullResult, bool arithmeticOp) {
+        flags.updateFlags(fullResult, arithmeticOp);
     }
 };
