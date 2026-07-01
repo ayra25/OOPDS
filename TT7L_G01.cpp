@@ -161,3 +161,276 @@ public:
         flags.updateFlags(fullResult, arithmeticOp);
     }
 };
+
+// section 6
+int regIndex(const string& s) {
+    if (s.size() == 2 && s[0] == 'R' && s[1] >= '0' && s[1] <= '7') {
+        return s[1] - '0';
+    }
+    return -1;
+}
+
+int parseImm(const string& s) { return stoi(s); }
+
+string trim(const string& s) {
+    int start = 0;
+    int end = (int)s.size() - 1;
+    while (start <= end && (s[start] == ' ' || s[start] == '\t')) start++;
+    while (end >= start && (s[end] == ' ' || s[end] == '\t')) end--;
+    return s.substr(start, end - start + 1);
+}
+
+string toUpper(const string& s) {
+    string result = s;
+    for (int i = 0; i < (int)result.size(); i++) {
+        if (result[i] >= 'a' && result[i] <= 'z') {
+            result[i] = result[i] - 'a' + 'A';
+        }
+    }
+    return result;
+
+class IOInstruction : public Instruction { // Ayra
+private:
+    string opcode;
+    int destReg;
+
+public:
+    IOInstruction(const string& line, const string& op, int reg)
+        : Instruction(line), opcode(op), destReg(reg) {}
+
+    void execute(CPU& cpu) override {
+        if (opcode == "INPUT") {
+            int val;
+            bool valid = false;
+            while (!valid) {
+                cout << "? ";
+                if (!(cin >> val)) {
+                    cin.clear();
+                    string dummy; cin >> dummy;
+                    cout << "Error: please enter an integer (-128 to 127)." << endl;
+                } else {
+                    valid = true;
+                }
+            }
+            int8_t stored = (int8_t)val;
+            cpu.setRegister(destReg, stored);
+            cpu.getFlags().setOF(val > 127  ? 1 : 0);
+            cpu.getFlags().setUF(val < -128 ? 1 : 0);
+            cpu.getFlags().setZF(val == 0   ? 1 : 0);
+        } else {
+            cout << (int)cpu.getRegister(destReg) << endl;
+        }
+    }
+};
+
+class MovInstruction : public Instruction {
+private:
+    int destReg;
+    int srcReg;
+    int immVal;
+    int addrReg;
+    int mode;      // 0=imm, 1=reg, 2=mem-indirect
+
+public:
+    MovInstruction(const string& line, int dest, int mode, int src, int imm, int addr)
+        : Instruction(line), destReg(dest), srcReg(src), immVal(imm),
+          addrReg(addr), mode(mode) {}
+
+    void execute(CPU& cpu) override {
+        int result = 0;
+        if (mode == 0) {
+            result = immVal;
+        } else if (mode == 1) {
+            result = (int)cpu.getRegister(srcReg);
+        } else {
+            int addr = (int)(uint8_t)cpu.getRegister(addrReg);
+            result = (int)cpu.readMemory(addr);
+        }
+        cpu.setRegister(destReg, (int8_t)result);
+        cpu.updateFlags(result, false);
+    }
+};
+
+class ArithmeticInstruction : public Instruction {
+private:
+    string opcode;
+    int destReg;
+    int srcReg;
+    int immVal;
+    int addrReg;
+    int mode;       // 0=imm, 1=reg, 2=mem-indirect
+
+public:
+    ArithmeticInstruction(const string& line, const string& op,
+                          int dest, int mode, int src, int imm, int addr)
+        : Instruction(line), opcode(op), destReg(dest),
+          srcReg(src), immVal(imm), addrReg(addr), mode(mode) {}
+
+    void execute(CPU& cpu) override {
+        int destVal = (int)cpu.getRegister(destReg);
+        int srcVal  = 0;
+
+        if (mode == 0) srcVal = immVal;
+        else if (mode == 1) srcVal = (int)cpu.getRegister(srcReg);
+        else {
+            int addr = (int)(uint8_t)cpu.getRegister(addrReg);
+            srcVal = (int)cpu.readMemory(addr);
+        }
+
+        int result = 0;
+        if (opcode == "ADD") result = destVal + srcVal;
+        else if (opcode == "SUB") result = destVal - srcVal;
+        else if (opcode == "MUL") result = destVal * srcVal;
+        else if (opcode == "DIV") {
+            if (destVal == 0) {
+                cout << "Error: Division by zero." << endl;
+                return;
+            }
+            result = srcVal / destVal;
+        }
+
+        cpu.setRegister(destReg, (int8_t)result);
+        cpu.updateFlags(result, true);
+    }
+};
+
+class IncDecInstruction : public Instruction {
+private:
+    string opcode;
+    int destReg;
+
+public:
+    IncDecInstruction(const string& line, const string& op, int dest)
+        : Instruction(line), opcode(op), destReg(dest) {}
+
+    void execute(CPU& cpu) override {
+        int val = (int)cpu.getRegister(destReg);
+        int result = (opcode == "INC") ? val + 1 : val - 1;
+        cpu.setRegister(destReg, (int8_t)result);
+        cpu.updateFlags(result, true);
+    }
+};
+
+class ShiftInstruction : public Instruction {
+private:
+    string opcode;
+    int destReg;
+    int count;
+
+    uint8_t toUnsigned(int8_t v) { return (uint8_t)v; }
+    int8_t toSigned(uint8_t v) { return (int8_t)v; }
+
+public:
+    ShiftInstruction(const string& line, const string& op, int dest, int cnt)
+        : Instruction(line), opcode(op), destReg(dest), count(cnt) {}
+
+    void execute(CPU& cpu) override {
+        uint8_t bits = toUnsigned(cpu.getRegister(destReg));
+        uint8_t result = 0;
+        int n = count % 8;
+
+        if (opcode == "ROL") {
+            result = (bits << n) | (bits >> (8 - n));
+        } else if (opcode == "ROR") {
+            result = (bits >> n) | (bits << (8 - n));
+        } else if (opcode == "SHL") {
+            result = (n >= 8) ? 0 : (bits << n);
+        } else if (opcode == "SHR") {
+            result = (n >= 8) ? 0 : (bits >> n);
+        }
+
+        int8_t signed_result = toSigned(result);
+        cpu.setRegister(destReg, signed_result);
+        cpu.updateFlags((int)signed_result, false);
+    }
+};
+
+class LoadInstruction : public Instruction {
+private:
+    int destReg;
+    int directAddr;
+    int addrReg;
+    int mode;       // 0=direct, 1=reg-indirect
+
+public:
+    LoadInstruction(const string& line, int dest, int mode, int addr, int reg)
+        : Instruction(line), destReg(dest), directAddr(addr),
+          addrReg(reg), mode(mode) {}
+
+    void execute(CPU& cpu) override {
+        int addr = 0;
+        if (mode == 0) {
+            addr = directAddr;
+        } else {
+            addr = (int)(uint8_t)cpu.getRegister(addrReg);
+        }
+        int8_t val = cpu.readMemory(addr);
+        cpu.setRegister(destReg, val);
+        cpu.updateFlags((int)val, false);
+    }
+};
+
+class StoreInstruction : public Instruction {
+private:
+    int srcReg;
+    int directAddr;
+    int addrReg;
+    int mode;        // 0=direct, 1=reg-indirect
+
+public:
+    StoreInstruction(const string& line, int src, int mode, int addr, int areg)
+        : Instruction(line), srcReg(src), directAddr(addr),
+          addrReg(areg), mode(mode) {}
+
+    void execute(CPU& cpu) override {
+        int addr = 0;
+        if (mode == 0) {
+            addr = directAddr;
+        } else {
+            addr = (int)(uint8_t)cpu.getRegister(addrReg);
+        }
+        cpu.writeMemory(addr, cpu.getRegister(srcReg));
+    }
+};
+
+class FlagResetInstruction : public Instruction {
+private:
+    string flagName;
+
+public:
+    FlagResetInstruction(const string& line, const string& flag)
+        : Instruction(line), flagName(flag) {}
+
+    void execute(CPU& cpu) override {
+        if      (flagName == "CF") cpu.getFlags().setCF(0);
+        else if (flagName == "OF") cpu.getFlags().setOF(0);
+        else if (flagName == "UF") cpu.getFlags().setUF(0);
+        else if (flagName == "ZF") cpu.getFlags().setZF(0);
+    }
+};
+
+class StackInstruction : public Instruction {
+private:
+    string opcode;
+    int reg;
+
+public:
+    StackInstruction(const string& line, const string& op, int r)
+        : Instruction(line), opcode(op), reg(r) {}
+
+    void execute(CPU& cpu) override {
+        if (opcode == "PUSH") {
+            cpu.stackPush(cpu.getRegister(reg));
+        } else {
+            int8_t val;
+            bool ok = cpu.stackPop(val);
+            if (!ok) {
+                cout << "Fatal Error: Stack underflow." << endl;
+                exit(1);
+            }
+            cpu.setRegister(reg, val);
+            cpu.updateFlags((int)val, false);
+        }
+    }
+};
+}
