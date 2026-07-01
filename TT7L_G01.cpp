@@ -98,6 +98,20 @@ public:
     }
 };
 
+// Section 4
+class CPU;
+
+class Instruction {
+protected:
+    string rawLine;
+
+public:
+    Instruction(const string& line) : rawLine(line) {}
+    virtual ~Instruction() {}
+    virtual void execute(CPU& cpu) = 0;
+    string getRaw() const { return rawLine; }
+};
+
 // SECTION 5 - CPU CLASS
 class CPU {
 private:
