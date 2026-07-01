@@ -161,3 +161,31 @@ public:
         flags.updateFlags(fullResult, arithmeticOp);
     }
 };
+
+// section 6
+int regIndex(const string& s) {
+    if (s.size() == 2 && s[0] == 'R' && s[1] >= '0' && s[1] <= '7') {
+        return s[1] - '0';
+    }
+    return -1;
+}
+
+int parseImm(const string& s) { return stoi(s); }
+
+string trim(const string& s) {
+    int start = 0;
+    int end = (int)s.size() - 1;
+    while (start <= end && (s[start] == ' ' || s[start] == '\t')) start++;
+    while (end >= start && (s[end] == ' ' || s[end] == '\t')) end--;
+    return s.substr(start, end - start + 1);
+}
+
+string toUpper(const string& s) {
+    string result = s;
+    for (int i = 0; i < (int)result.size(); i++) {
+        if (result[i] >= 'a' && result[i] <= 'z') {
+            result[i] = result[i] - 'a' + 'A';
+        }
+    }
+    return result;
+}
