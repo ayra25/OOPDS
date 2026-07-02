@@ -434,3 +434,294 @@ public:
     }
 };
 }
+
+// =============================================================================
+// SECTION 7 - RUNNER CLASS
+// =============================================================================
+class Runner {
+private:
+    CPU cpu;                 
+    MyList instructionLines; 
+    MyQueue instructionQueue;
+
+    Instruction* parseIO(const string& raw, const string& op, const string& rest) {
+        int r = regIndex(toUpper(trim(rest)));
+        if (r < 0) return nullptr;
+        return new IOInstruction(raw, op, r);
+    }
+
+    Instruction* parseMov(const string& raw, const string& rest) {
+        int comma = rest.find(',');
+        if (comma == (int)string::npos) return nullptr;
+        string destStr = toUpper(trim(rest.substr(0, comma)));
+        string srcStr  = trim(rest.substr(comma + 1));
+        int dest = regIndex(destStr);
+        if (dest < 0) return nullptr;
+
+        if (srcStr[0] == '[' && srcStr.back() == ']') {
+            string in = toUpper(trim(srcStr.substr(1, srcStr.size() - 2)));
+            int addr = regIndex(in);
+            if (addr < 0) return nullptr;
+            return new MovInstruction(raw, dest, 2, -1, 0, addr);
+        }
+        int src = regIndex(toUpper(srcStr));
+        if (src >= 0) return new MovInstruction(raw, dest, 1, src, 0, -1);
+        return new MovInstruction(raw, dest, 0, -1, parseImm(srcStr), -1);
+    }
+
+    Instruction* parseArithmetic(const string& raw, const string& op, const string& rest) {
+        int comma = rest.find(',');
+        if (comma == (int)string::npos) return nullptr;
+        int dest = regIndex(toUpper(trim(rest.substr(0, comma))));
+        string srcStr = trim(rest.substr(comma + 1));
+        if (dest < 0) return nullptr;
+
+        if (srcStr[0] == '[' && srcStr.back() == ']') {
+            string in = toUpper(trim(srcStr.substr(1, srcStr.size() - 2)));
+            int addr = regIndex(in);
+            if (addr < 0) return nullptr;
+            return new ArithmeticInstruction(raw, op, dest, 2, -1, 0, addr);
+        }
+        int src = regIndex(toUpper(srcStr));
+        if (src >= 0) return new ArithmeticInstruction(raw, op, dest, 1, src, 0, -1);
+        return new ArithmeticInstruction(raw, op, dest, 0, -1, parseImm(srcStr), -1);
+    }
+
+    Instruction* parseLoad(const string& raw, const string& rest) {
+        int comma = rest.find(',');
+        if (comma == (int)string::npos) return nullptr;
+        int dest = regIndex(toUpper(trim(rest.substr(0, comma))));
+        string srcStr = trim(rest.substr(comma + 1));
+        if (dest < 0) return nullptr;
+
+        if (srcStr[0] == '[' && srcStr.back() == ']') {
+            string in = toUpper(trim(srcStr.substr(1, srcStr.size() - 2)));
+            int src = regIndex(in);
+            if (src >= 0) return new LoadInstruction(raw, dest, 1, 0, src);
+            return new LoadInstruction(raw, dest, 0, parseImm(in), -1);
+        }
+        return nullptr;
+    }
+
+    Instruction* parseStore(const string& raw, const string& rest) {
+        int comma = rest.find(',');
+        if (comma == (int)string::npos) return nullptr;
+        string first = trim(rest.substr(0, comma));
+        string second = trim(rest.substr(comma + 1));
+
+        if (first[0] == '[' && first.back() == ']') {
+            int addrReg = regIndex(toUpper(trim(first.substr(1, first.size() - 2))));
+            int srcReg = regIndex(toUpper(second));
+            if (addrReg < 0 || srcReg < 0) return nullptr;
+            return new StoreInstruction(raw, srcReg, 1, 0, addrReg);
+        }
+        int srcReg = regIndex(toUpper(first));
+        if (srcReg >= 0) return new StoreInstruction(raw, srcReg, 0, parseImm(second), -1);
+        return nullptr;
+    }
+
+    Instruction* parseIncDec(const string& raw, const string& op, const string& rest) {
+        int r = regIndex(toUpper(trim(rest)));
+        if (r < 0) return nullptr;
+        return new IncDecInstruction(raw, op, r);
+    }
+
+    Instruction* parseShift(const string& raw, const string& op, const string& rest) {
+        int comma = rest.find(',');
+        if (comma == (int)string::npos) return nullptr;
+        int r = regIndex(toUpper(trim(rest.substr(0, comma))));
+        int cnt = parseImm(trim(rest.substr(comma + 1)));
+        if (r < 0) return nullptr;
+        return new ShiftInstruction(raw, op, r, cnt);
+    }
+
+    Instruction* parseStack(const string& raw, const string& op, const string& rest) {
+        int r = regIndex(toUpper(trim(rest)));
+        if (r < 0) return nullptr;
+        return new StackInstruction(raw, op, r);
+    }
+
+    Instruction* parseReset(const string& raw, const string& rest) {
+        string flag = toUpper(trim(rest));
+        if (flag=="CF" || flag=="OF" || flag=="UF" || flag=="ZF")
+            return new FlagResetInstruction(raw, flag);
+        return nullptr;
+    }
+
+    Instruction* parseInstruction(const string& rawLine) {
+        string line = trim(rawLine);
+        if (line.empty()) return nullptr;
+
+        string opcode = ""; int i = 0;
+        while (i < (int)line.size() && line[i] != ' ' && line[i] != '\t') opcode += line[i++];
+        opcode = toUpper(opcode);
+        string rest = (i < (int)line.size()) ? trim(line.substr(i)) : "";
+
+        if (opcode == "MOV") return parseMov(rawLine, rest);
+        if (opcode == "LOAD") return parseLoad(rawLine, rest);
+        if (opcode == "STORE") return parseStore(rawLine, rest);
+        if (opcode == "ADD" || opcode == "SUB" || opcode == "MUL" || opcode == "DIV")
+            return parseArithmetic(rawLine, opcode, rest);
+        if (opcode == "INPUT" || opcode == "DISPLAY") return parseIO(rawLine, opcode, rest);
+        if (opcode == "INC" || opcode == "DEC") return parseIncDec(rawLine, opcode, rest);
+        if (opcode == "ROL" || opcode == "ROR" || opcode == "SHL" || opcode == "SHR")
+            return parseShift(rawLine, opcode, rest);
+        if (opcode == "PUSH" || opcode == "POP") return parseStack(rawLine, opcode, rest);
+        if (opcode == "RESET") return parseReset(rawLine, rest);
+
+        cout << "Error: Unknown instruction '" << opcode << "'" << endl;
+        return nullptr;
+    }
+
+public:
+    bool loadProgram(const string& filename) {
+        ifstream file(filename.c_str());
+        if (!file.is_open()) {
+            cout << "Error: Cannot open file '" << filename << "'" << endl;
+            return false;
+        }
+
+        string line;
+        while (getline(file, line)) {
+            line = trim(line);
+            if (line.empty()) continue; 
+            instructionLines.push_back(line);
+            instructionQueue.enqueue(line); 
+        }
+        file.close();
+        return true;
+    }
+
+    void run() {
+        cpu.resetPC();
+        int count = instructionQueue.getSize();
+        Instruction** program = new Instruction*[count];
+        int loaded = 0;
+
+        while (!instructionQueue.isEmpty()) {
+            string raw = instructionQueue.dequeue();
+            program[loaded] = parseInstruction(raw);
+            loaded++;
+        }
+
+        cout << "\n=== Start program ===" << endl;
+        cout << "R0  R1  R2  R3  R4  R5  R6  R7  PC" << endl;
+        cout << "  0   0   0   0   0   0   0   0   " << (int)cpu.getPC() << endl;
+
+        for (int idx = 0; idx < loaded; idx++) {
+            if (program[idx] == nullptr) {
+                cpu.incrementPC();
+                continue;
+            }
+
+            cout << "\n> " << instructionLines.get(idx) << endl;
+            program[idx]->execute(cpu);
+            cpu.incrementPC();
+
+            cout << "R0=" << setw(3) << (int)cpu.getRegister(0)
+                 << "  R1=" << setw(3) << (int)cpu.getRegister(1)
+                 << "  R2=" << setw(3) << (int)cpu.getRegister(2)
+                 << "  R3=" << setw(3) << (int)cpu.getRegister(3)
+                 << "  R4=" << setw(3) << (int)cpu.getRegister(4)
+                 << "  R5=" << setw(3) << (int)cpu.getRegister(5)
+                 << "  R6=" << setw(3) << (int)cpu.getRegister(6)
+                 << "  R7=" << setw(3) << (int)cpu.getRegister(7)
+                 << "  PC=" << (int)cpu.getPC() << endl;
+        }
+
+        cout << "\n=== End of program ===" << endl;
+        for (int i = 0; i < loaded; i++) delete program[i];
+        delete[] program;
+    }
+
+    void dumpToScreen() const {
+        cout << "\n=== Virtual Machine State Dump ===" << endl;
+        cout << "Registers:" << endl;
+        for (int i = 0; i < 8; i++) cout << "  R" << i << " = " << (int)cpu.getRegister(i) << endl;
+
+        cout << "Flags:" << endl;
+        cout << "  OF=" << cpu.getFlags().getOF()
+             << "  UF=" << cpu.getFlags().getUF()
+             << "  CF=" << cpu.getFlags().getCF()
+             << "  ZF=" << cpu.getFlags().getZF() << endl;
+
+        cout << "PC = " << (int)cpu.getPC() << endl;
+        cout << "SI = " << (int)cpu.getSI() << endl;
+
+        cout << "Memory (0..63):" << endl;
+        for (int row = 0; row < 8; row++) {
+            for (int col = 0; col < 8; col++) {
+                int addr = row * 8 + col;
+                cout << setw(5) << (int)(uint8_t)cpu.getMemoryCell(addr);
+            }
+            cout << endl;
+        }
+    }
+
+    void dumpToFile(const string& filename) const {
+        ofstream out(filename.c_str());
+        if (!out.is_open()) return;
+
+        out << "#Begin#" << endl;
+        out << "#Registers#";
+        for (int i = 0; i < 8; i++) {
+            int v = (int)(uint8_t)cpu.getRegister(i);
+            out << setw(4) << setfill('0') << v << "#";
+        }
+        out << endl;
+
+        out << "#Flags#"
+            << "OF#" << cpu.getFlags().getOF() << "#"
+            << "UF#" << cpu.getFlags().getUF() << "#"
+            << "CF#" << cpu.getFlags().getCF() << "#"
+            << "ZF#" << cpu.getFlags().getZF() << "#" << endl;
+
+        out << "#PC#" << setw(4) << setfill('0') << (int)cpu.getPC() << "#" << endl;
+
+        out << "#Memory#" << endl;
+        for (int row = 0; row < 8; row++) {
+            out << "#";
+            for (int col = 0; col < 8; col++) {
+                int addr = row * 8 + col;
+                int v = (int)(uint8_t)cpu.getMemoryCell(addr);
+                out << setw(4) << setfill('0') << v << "#";
+            }
+            out << endl;
+        }
+        out << "#End#" << endl;
+        out.close();
+        cout << "\nOutput written to '" << filename << "'" << endl;
+    }
+};
+
+// =============================================================================
+// SECTION 8 - MAIN FUNCTION
+// =============================================================================
+int main(int argc, char* argv[]) {
+    cout << "==================================================" << endl;
+    cout << "  CCP6124 Virtual Machine Interpreter - TT4L_G01" << endl;
+    cout << "==================================================" << endl;
+
+    string inputFile;
+    if (argc >= 2) {
+        inputFile = argv[1];
+    } else {
+        cout << "Usage: " << argv[0] << " <program.asm>" << endl;
+        cout << "Enter .asm filename: ";
+        cin >> inputFile;
+    }
+
+    string outputFile = inputFile;
+    int dot = (int)outputFile.rfind('.');
+    if (dot != (int)string::npos) outputFile = outputFile.substr(0, dot);
+    outputFile += "_output.txt";
+
+    Runner runner;
+    if (!runner.loadProgram(inputFile)) return 1;
+
+    runner.run();
+    runner.dumpToScreen();
+    runner.dumpToFile(outputFile);
+
+    return 0;
+}
